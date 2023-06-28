@@ -1,0 +1,221 @@
+Datasets:
+https://github.com/AlexTheAnalyst/PortfolioProjects/blob/main/CovidDeaths.xlsx
+https://github.com/AlexTheAnalyst/PortfolioProjects/blob/main/CovidVaccinations.xlsx
+
+
+-- Covid 19 Data Exploration
+-- Skills used: Joins, CTE's, Temp Tables, Windows Functions, Aggregate Functions, Creating Views, Converting Data Types
+
+
+-- Show the last information about likelihood of dying in each country ordered by most affected locations
+
+SELECT
+Location,
+max(total_cases), 
+max(total_deaths),
+round((max(total_deaths) / max(total_cases) * 100),2) as percentage_of_death
+FROM covid_deaths
+WHERE continent IS NOT NULL
+GROUP BY location
+ORDER BY percentage_of_death DESC
+
+
+
+-- How was this percentage varying through time in the United States?
+
+SELECT location, date, total_cases, total_deaths, round(((total_deaths / total_cases) * 100),2) as percentage_of_death
+FROM covid_deaths
+WHERE location like "%United States%"
+ORDER BY date
+
+
+-- Which European locations had the highest percentage of deaths? Show in which dates they reached they worst moment.
+
+SELECT location,
+      total_cases,
+      total_deaths,
+      round(max(((total_deaths / total_cases) * 100)),2) as worst_death_rate_percentage,
+      date
+FROM covid_deaths
+WHERE continent = 'Europe' and total_cases >= 100
+GROUP BY location
+HAVING worst_death_rate_percentage IS NOT NULL
+ORDER BY worst_death_rate_percentage DESC
+
+
+
+
+-- Show what percentage of population infected with Covid
+
+SELECT Location, date, total_cases, new_cases, population, ((total_cases/population)*100) as percentage_of_infected
+FROM covid_deaths
+WHERE continent IS NOT NULL
+ORDER BY 1, date
+
+
+
+-- Countries with Highest Infection Rate compared to Population
+
+SELECT
+Location,
+max(total_cases),
+population,
+round( max(( (total_cases/population)*100)),2) as percentage_of_infected
+FROM covid_deaths
+WHERE continent IS NOT NULL
+GROUP BY location
+ORDER BY percentage_of_infected DESC
+
+
+
+
+-- Countries with Highest Death Count per Population
+
+SELECT
+Location,
+max(cast(total_deaths as int )) as max_total_deaths,
+population,
+round(max(((total_deaths/population)*100)),2) as percentage_of_death
+FROM covid_deaths
+WHERE continent IS NOT NULL
+GROUP BY location
+ORDER BY max_total_deaths DESC
+
+
+
+
+-- Show contintents with the highest death percentage
+
+SELECT
+continent,
+population,
+max(cast(total_deaths as int )) as max_total_deaths,
+round(max(((total_deaths/population)*100)),2) as percentage_of_death
+FROM covid_deaths
+WHERE continent IS NOT NULL
+GROUP BY continent
+ORDER BY percentage_of_death DESC
+
+
+
+
+
+-- GLOBAL NUMBERS
+
+-- Think about a visualization that shows new_cases vs new_deaths accross time
+
+SELECT
+date,
+sum(new_cases) as world_new_cases,
+sum(new_deaths) as world_new_deaths,
+round((sum(new_deaths)/sum(new_cases))*100,2) as percentage_of_death
+from covid_deaths cd
+where continent is not null
+group by date
+order by 1, 2
+
+
+
+-- Show vaccinations accross time + show total vaccinations of each location until each date
+
+SELECT
+cd.continent,
+cd.location,
+cd.date,
+cd.population,
+cv.new_vaccinations,
+sum(cv.new_vaccinations) OVER (PARTITION BY cd.location ORDER BY cd.location, cd.date) as total_location_vaccinations_until_date
+FROM covid_deaths cd JOIN covid_vaccinations cv
+ON cd.location = cv.location
+AND cd.date = cv.date
+WHERE cd.continent is not null and cv.new_vaccinations is not null
+ORDER BY cd.location
+
+
+
+-- Create a temp table for south america vaccination through time
+
+DROP TABLE IF EXISTS south_america_vaccinations
+CREATE TEMPORARY TABLE south_america_vaccinations (
+continent VARCHAR,
+location VARCHAR,
+date DATETIME,
+population NUMERIC,
+new_vaccinations NUMERIC,
+total_location_vaccinations_until_date NUMERIC
+)
+
+INSERT INTO south_america_vaccinations
+SELECT
+cd.continent,
+cd.location,
+cd.date,
+cd.population,
+cv.new_vaccinations,
+sum(cv.new_vaccinations) OVER (PARTITION BY cd.location ORDER BY cd.location, cd.date) as total_location_vaccinations_until_date
+FROM covid_deaths cd JOIN covid_vaccinations cv
+ON cd.location = cv.location
+AND cd.date = cv.date
+WHERE cd.continent LIKE 'South%' and cv.new_vaccinations is not null
+ORDER BY cd.location
+
+SELECT *
+FROM south_america_vaccinations
+
+
+
+-- Creating View to store data for later visualizations
+
+CREATE VIEW south_america_vaccinations as
+SELECT *
+FROM south_america_vaccinations
+
+
+
+-- Total Population vs Vaccinations
+
+WITH population_vaccinated AS (
+SELECT cd.location, population, vaccinations, continent
+FROM (
+SELECT location, max(population) as population, continent
+FROM covid_deaths cd
+WHERE continent IS NOT NULL
+GROUP BY location
+ORDER BY location
+) AS cd
+JOIN (
+SELECT location, max(total_vaccinations) as vaccinations
+FROM covid_vaccinations cv
+WHERE continent IS NOT NULL
+GROUP BY location
+ORDER BY location
+) AS cv
+ON cd.location = cv.location
+GROUP BY cd.location
+)
+SELECT
+sum(population_vaccinated.population) as total_world_population,
+sum(population_vaccinated.vaccinations) as total_world_vaccinations,
+(sum(population_vaccinated.vaccinations)/ sum(population_vaccinated.population))*100 AS percentage_vaccinated
+FROM population_vaccinated
+
+
+
+
+
+-- Show Percentage of Population that has recieved at least one Covid Vaccine
+
+WITH population_vaccinated AS (
+    SELECT
+        cd.continent,
+        cd.location,
+        cd.date,
+        cd.population,
+        cv.new_vaccinations,
+        sum(cv.new_vaccinations) OVER (PARTITION BY cd.location ORDER BY cd.location, cd.date) AS total_location_vaccinations_until_date
+    FROM covid_deaths cd
+    JOIN covid_vaccinations cv ON cd.location = cv.location AND cd.date = cv.date
+    WHERE cd.continent IS NOT NULL AND cv.new_vaccinations IS NOT NULL
+)
+SELECT *, round((total_location_vaccinations_until_date/population)*100,2) as percentage_people_vaccinated
+FROM population_vaccinated
